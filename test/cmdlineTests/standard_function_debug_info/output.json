@@ -1,0 +1,4 @@
+{"errors":[{"component":"general","errorCode":"3420","formattedMessage":"Warning: Source file does not specify required compiler version!
+--> a.sol
+
+","message":"Source file does not specify required compiler version!","severity":"warning","sourceLocation":{"end":-1,"file":"a.sol","start":-1},"type":"Warning"}],"sources":{"a.sol":{"id":0}}}
