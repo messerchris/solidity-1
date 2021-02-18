@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -123,6 +124,17 @@ void SemanticTest::initializeBuiltins()
 	m_builtins["smokeTest"] = [](FunctionCall const&) -> std::optional<bytes>
 	{
 		return util::toBigEndian(u256(0x1234));
+	};
+	soltestAssert(m_builtins.count("balance") == 0, "");
+	m_builtins["balance"] = [this](FunctionCall const& _call) -> std::optional<bytes>
+	{
+		soltestAssert(_call.arguments.parameters.size() <= 1, "Account address expected.");
+		h160 address;
+		if (_call.arguments.parameters.size() == 1)
+			address = h160(_call.arguments.parameters.at(0).rawString);
+		else
+			address = m_contractAddress;
+		return util::toBigEndian(SolidityExecutionFramework::balanceAt(address));
 	};
 }
 

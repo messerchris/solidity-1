@@ -15,6 +15,6 @@ contract C {
 // ----
 // constructor(), 2 wei: 3 ->
 // state() -> 3
-// balance() -> 2
+// balance -> 2
 // update(uint256): 4
 // state() -> 4
