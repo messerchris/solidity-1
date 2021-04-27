@@ -39,6 +39,8 @@ class ErrorReporter;
 
 namespace solidity::yul
 {
+langutil::SourceLocation extractSourceLocationFromDebugData(std::shared_ptr<DebugData const> const& _debugData);
+
 struct AsmAnalysisInfo;
 class EVMAssembly;
 

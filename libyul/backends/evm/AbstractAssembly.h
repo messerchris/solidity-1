@@ -42,6 +42,7 @@ enum class Instruction: uint8_t;
 namespace solidity::yul
 {
 struct Identifier;
+struct DebugData;
 
 ///
 /// Assembly class that abstracts both the libevmasm assembly and the new Yul assembly.
