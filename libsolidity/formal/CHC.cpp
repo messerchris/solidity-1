@@ -219,7 +219,10 @@ bool CHC::visit(FunctionDefinition const& _function)
 	if (!m_currentContract)
 		return false;
 
-	if (!_function.isImplemented())
+	if (
+		!_function.isImplemented() ||
+		abstractAsUF(_function)
+	)
 	{
 		addRule(summary(_function), "summary_function_" + to_string(_function.id()));
 		return false;
@@ -262,7 +265,10 @@ void CHC::endVisit(FunctionDefinition const& _function)
 	if (!m_currentContract)
 		return;
 
-	if (!_function.isImplemented())
+	if (
+		!_function.isImplemented() ||
+		abstractAsUF(_function)
+	)
 		return;
 
 	solAssert(m_currentFunction && m_currentContract, "");
@@ -1001,6 +1007,21 @@ set<unsigned> CHC::transactionVerificationTargetsIds(ASTNode const* _txRoot)
 	return verificationTargetsIds;
 }
 
+bool CHC::abstractAsUF(FunctionDefinition const& _function)
+{
+	auto const& tags = _function.annotation().docTags;
+	string smtStr = "custom:smtchecker";
+	for (auto it = tags.find(smtStr); it != tags.end() && it->first == smtStr; ++it)
+	{
+		string const& content = it->second.content;
+		if (content == "abstract-function")
+			return true;
+		else
+			m_errorReporter.warning(0000_error, _function.location(), "Unknown option for \"custom:smtchecker\": \"" + content + "\"");
+	}
+	return false;
+}
+
 SortPointer CHC::sort(FunctionDefinition const& _function)
 {
 	return functionBodySort(_function, m_currentContract, state());
@@ -1045,6 +1066,7 @@ void CHC::defineInterfacesAndSummaries(SourceUnit const& _source)
 			auto const& resolved = contractFunctions(*contract);
 			for (auto const* function: contractFunctionsWithoutVirtual(*contract) + allFreeFunctions())
 			{
+				cout << "Registering summary for function " << function->name() << " in contract " << contract->name() << endl;
 				for (auto var: function->parameters())
 					createVariable(*var);
 				for (auto var: function->returnParameters())
@@ -1349,6 +1371,9 @@ smtutil::Expression CHC::predicate(FunctionCall const& _funCall)
 		args.push_back(currentValue(*var));
 	}
 
+	cout << "Location: " + _funCall.location().text() << endl;
+	cout << "Current contract: " << m_currentContract->name() << endl;
+	cout << "Has contract: " << m_summaries.count(m_currentContract) << endl;
 	Predicate const& summary = *m_summaries.at(m_currentContract).at(function);
 	auto from = smt::function(summary, m_currentContract, m_context);
 	Predicate const& callPredicate = *createSummaryBlock(

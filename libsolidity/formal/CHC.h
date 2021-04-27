@@ -123,6 +123,11 @@ private:
 	std::set<unsigned> transactionVerificationTargetsIds(ASTNode const* _txRoot);
 	//@}
 
+	/// Abstraction helpers.
+	//@{
+	bool abstractAsUF(FunctionDefinition const& _function);
+	//@}
+
 	/// Sort helpers.
 	//@{
 	smtutil::SortPointer sort(FunctionDefinition const& _function);
