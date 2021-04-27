@@ -5,8 +5,8 @@
 The Optimizer
 *************
 
-The Solidity compiler uses two different optimizer modules: The “old” optimizer
-that operates at opcode level and the “new” optimizer that operates on Yul IR code.
+The Solidity compiler uses two different optimizer modules: The "old" optimizer
+that operates at opcode level and the "new" optimizer that operates on Yul IR code.
 
 The opcode-based optimizer applies simplification rules from the
 `list to opcodes <https://github.com/ethereum/solidity/blob/develop/libevmasm/RuleList.h>`_
@@ -41,7 +41,7 @@ Differences between Optimized and Non-Optimized Code
 
 Generally, the most visible difference would be constant expressions getting evaluated.
 When it comes to the ASM output, one can also notice reduction of equivalent/duplicate
-“code blocks” (compare the output of the flags ``--asm`` and ``--asm --optimize``). However,
+"code blocks" (compare the output of the flags ``--asm`` and ``--asm --optimize``). However,
 when it comes to the Yul/intermediate-representation, there can be significant
 differences, for example, functions can get inlined, combined, rewritten to eliminate
 redundancies, etc. (compare the output between the flags ``--ir`` and
@@ -51,8 +51,8 @@ Optimize Runs
 =============
 
 The number of runs (``--optimize-runs``) specifies roughly how often each opcode of the
-deployed code will be executed across the life-time of the contract. A “runs” parameter
-of “1” will produce short but expensive code. The largest value is ``2**64-1``.
+deployed code will be executed across the life-time of the contract. A "runs" parameter
+of "1" will produce short but expensive code. The largest value is ``2**32-1``.
 
 Opcode-Based Optimizer Module
 =============================
@@ -199,6 +199,11 @@ the AST in a semantically equivalent way. The goal is to end up either with code
 that is shorter or at least only marginally longer but will allow further
 optimization steps.
 
+.. warning::
+
+    Since the optimizer is under heavy development, the information here might be outdated.
+    If you rely on a certain functionality, please reach out to the team directly.
+
 The optimizer currently follows a purely greedy strategy and does not do any
 backtracking.
 
@@ -218,36 +223,36 @@ This is a list of all steps the Yul-based optimizer sorted alphabetically. You c
 on the individual steps and their sequence below.
 
  - :ref:`block-flattener`.
- - CircularReferencesPruner - To be documented.
+ - :ref:`circular-reference-pruner`.
  - :ref:`common-subexpression-eliminator`.
- - ConditionalSimplifier - To be documented.
- - ConditionalUnsimplifier - To be documented.
- - ControlFlowSimplifier - To be documented.
- - DeadCodeEliminator - To be documented.
+ - :ref:`conditional-simplifier`.
+ - :ref:`conditional-unsimplifier`.
+ - :ref:`control-flow-simplifier`.
+ - :ref:`dead-code-eliminator`.
  - :ref:`equivalent-function-combiner`.
- - ExpressionInliner - To be documented.
+ - :ref:`expression-inliner`
  - :ref:`expression-joiner`.
  - :ref:`expression-simplifier`.
  - :ref:`expression-splitter`.
  - :ref:`for-loop-condition-into-body`.
- - ForLoopConditionOutOfBody - To be documented.
+ - :ref:`for-loop-condition-out-of-body`.
  - :ref:`for-loop-init-rewriter`.
  - :ref:`functional-inliner`.
  - :ref:`function-grouper`.
  - :ref:`function-hoister`.
- - FunctionSpecializer - To be documented.
- - LiteralRematerialiser - To be documented.
- - LoadResolver - To be documented.
- - LoopInvariantCodeMotion - To be documented.
+ - :ref:`function-specializer`.
+ - :ref:`literal-rematerialiser`.
+ - :ref:`load-resolver`.
+ - :ref:`loop-invariant-code-motion`.
  - :ref:`redundant-assign-eliminator`.
- - ReasoningBasedSimplifier - To be documented.
+ - :ref:`reasoning-based-simplifier`.
  - :ref:`rematerialiser`.
  - :ref:`SSA-reverser`.
  - :ref:`SSA-transform`.
  - :ref:`structural-simplifier`.
  - :ref:`unused-function-parameter-pruner`.
  - :ref:`unused-pruner`.
- - VarDeclInitializer - To be documented.
+ - :ref:`var-decl-initializer`.
 
 Selecting Optimizations
 -----------------------
@@ -281,7 +286,7 @@ Disambiguator
 The disambiguator takes an AST and returns a fresh copy where all identifiers have
 unique names in the input AST. This is a prerequisite for all other optimizer stages.
 One of the benefits is that identifier lookup does not need to take scopes into account
-and we can basically ignore the result of the analysis phase.
+which simplifies the analysis needed for other steps.
 
 All subsequent stages have the property that all names stay unique. This means if
 a new identifier needs to be introduced, a new unique name is generated.
@@ -760,7 +765,7 @@ UnusedFunctionParameterPruner
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 This step removes unused parameters in a function.
- 
+
 If a parameter is unused, like ``c`` and ``y`` in, ``function f(a,b,c) -> x, y { x := div(a,b) }``, we
 remove the parameter and create a new "linking" function as follows:
 
@@ -1011,3 +1016,232 @@ Changes the topmost block to be a function with a specific name ("main") which h
 inputs nor outputs.
 
 Depends on the Function Grouper.
+
+## Below steps still need to be sorted into the list above according to their category.
+
+.. _circular-reference-pruner:
+
+CircularReferencesPruner
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+This stage removes functions that call each other but are
+neither externally referenced nor referenced from the outermost context.
+
+
+.. _conditional-simplifier:
+
+ConditionalSimplifier
+^^^^^^^^^^^^^^^^^^^^^
+
+The Conditional Simplifier inserts assignments to condition variables if the value can be determined
+from the control-flow.
+
+Destroys SSA form.
+
+Currently, this tool is very limited, mostly because we do not yet have support
+for boolean types. Since conditions only check for expressions being nonzero,
+we cannot assign a specific value.
+
+Current features:
+    - switch cases: insert "<condition> := <caseLabel>"
+    - after if statement with terminating control-flow, insert "<condition> := 0"
+
+Future features:
+    - allow replacements by "1"
+    - take termination of user-defined functions into account
+
+Works best with SSA form and if dead code removal has run before.
+
+Prerequisite: Disambiguator.
+
+.. _conditional-unsimplifier:
+
+ConditionalUnsimplifier
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Reverse of Conditional Simplifier.
+
+.. _control-flow-simplifier:
+
+ControlFlowSimplifier
+^^^^^^^^^^^^^^^^^^^^^
+
+Simplifies several control-flow structures:
+- replace if with empty body with pop(condition)
+- remove empty default switch case
+- remove empty switch case if no default case exists
+- replace switch with no cases with pop(expression)
+- turn switch with single case into if
+- replace switch with only default case with pop(expression) and body
+- replace switch with const expr with matching case body
+- replace ``for`` with terminating control flow and without other break/continue by ``if``
+- remove ``leave`` at the end of a function.
+
+None of these operations depend on the data flow. The StructuralSimplifier
+performs similar tasks that do depend on data flow.
+
+The ControlFlowSimplifier does record the presence or absence of ``break``
+and ``continue`` statements during its traversal.
+
+Prerequisite: Disambiguator, FunctionHoister, ForLoopInitRewriter.
+Important: Introduces EVM opcodes and thus can only be used on EVM code for now.
+
+.. _dead-code-eliminator:
+
+DeadCodeEliminator
+^^^^^^^^^^^^^^^^^^
+
+This optimization stage removes unreachable code.
+
+Unreachable code is any code within a block which is preceded by a
+leave, return, invalid, break, continue, selfdestruct or revert.
+
+Function definitions are retained as they might be called by earlier
+code and thus are considered reachable.
+
+Because variables declared in a for loop's init block have their scope extended to the loop body,
+we require ForLoopInitRewriter to run before this step.
+
+Prerequisite: ForLoopInitRewriter, Function Hoister, Function Grouper
+
+
+.. _expression-inliner:
+
+ExpressionInliner
+^^^^^^^^^^^^^^^^^
+
+This optimizer component modifies an AST in place, inlining functions that can be
+inlined inside functional expressions, i.e. functions that:
+    - return a single value.
+    - have a body like r := <functional expression>.
+    - neither reference themselves nor r in the right hand side.
+
+Furthermore, for all parameters, all of the following need to be true
+    - the argument is movable.
+    - the parameter is either referenced less than twice in the function body, or the argument is rather cheap
+("cost" of at most 1 like a constant up to 0xff).
+
+This component can only be used on sources with unique names.
+
+.. _for-loop-condition-out-of-body:
+
+ForLoopConditionOutOfBody
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Reverses the transformation of ForLoopConditionIntoBody.
+
+For any movable ``c``, it turns
+
+::
+
+    for { ... } 1 { ... } {
+    if iszero(c) { break }
+    ...
+    }
+
+into
+
+::
+
+    for { ... } c { ... } {
+    ...
+    }
+
+and it turns
+
+::
+
+    for { ... } 1 { ... } {
+    if c { break }
+    ...
+    } 
+
+into
+
+::
+
+    for { ... } iszero(c) { ... } {
+    ...
+    }
+
+The LiteralRematerialiser should be run before this step.
+
+.. _funtion-specializer:
+
+FunctionSpecializer
+^^^^^^^^^^^^^^^^^^^
+
+This step specializes the function with its literal arguments.
+
+If a function, say, `function f(a, b) { sstore (a, b)}`, is called with literal arguments, for
+example, `f(x, 5)`, where `x` is an identifier, it could be specialized by creating a new
+function `f_1` that takes only one argument, i.e.,
+
+::
+
+    function f_1(a_1) {
+    let b_1 := 5
+    sstore(a_1, b_1)
+    }
+
+Other optimization steps will be able to make more simplifications to the function. The
+optimization step is mainly useful for functions that would not be inlined.
+
+Prerequisites: Disambiguator, FunctionHoister
+
+LiteralRematerialiser is recommended as a prerequisite, even though it's not required for
+correctness.
+
+.. _literal-rematerialiser:
+
+LiteralRematerialiser
+^^^^^^^^^^^^^^^^^^^^^
+
+.. _load-resolver:
+
+LoadResolver
+^^^^^^^^^^^^
+
+Optimisation stage that replaces expressions of type ``sload(x)`` and ``mload(x)`` by the value
+currently stored in storage resp. memory, if known.
+
+Works best if the code is in SSA form.
+
+Prerequisite: Disambiguator, ForLoopInitRewriter.
+
+.. _loop-invariant-code-motion:
+
+LoopInvariantCodeMotion
+^^^^^^^^^^^^^^^^^^^^^^^
+This optimization moves movable SSA variable declarations outside the loop.
+
+Only statements at the top level in a loop's body or post block are considered, i.e variable
+declarations inside conditional branches will not be moved out of the loop.
+
+Requirements:
+    - The Disambiguator, ForLoopInitRewriter and FunctionHoister must be run upfront.
+    - Expression splitter and SSA transform should be run upfront to obtain better result.
+
+.. _reasoning-based-simplifier:
+
+ReasoningBasedSimplifier
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+This optimizer uses SMT solvers to check whether `if` conditions are constant.
+    - If `constraints AND condition` is UNSAT, the condition is never true and the whole body can be removed.
+    - If `constraints AND NOT condition` is UNSAT, the condition is always true and can be replaced by `1`.
+The simplifications above can only be applied if the condition is movable.
+
+It is only effective on the EVM dialect, but safe to use on other dialects.
+
+Prerequisite: Disambiguator, SSATransform.
+
+
+.. _var-decl-initializer:
+
+VarDeclInitializer
+^^^^^^^^^^^^^^^^^^
+This step rewrites variable declarations so that all of them are initialized.
+Declarations like ``let x, y`` are split into multiple declaration statements.
+
+Only supports initializing with the zero literal for now.
